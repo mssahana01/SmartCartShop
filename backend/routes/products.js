@@ -5,41 +5,24 @@ const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// GET all products (public)
+// Get all products
 router.get('/', async (req, res) => {
   try {
-    const { category, search } = req.query;
-    
-    const where = {};
-    if (category) {
-      where.category = category;
-    }
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } }
-      ];
-    }
-    
     const products = await prisma.product.findMany({
-      where,
       orderBy: { createdAt: 'desc' }
     });
-    
     res.json(products);
   } catch (error) {
-    console.error('Get products error:', error);
+    console.error('Error fetching products:', error);
     res.status(500).json({ error: 'Failed to fetch products' });
   }
 });
 
-// GET single product (public)
+// Get single product
 router.get('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    
     const product = await prisma.product.findUnique({
-      where: { id: parseInt(id) }
+      where: { id: parseInt(req.params.id) }
     });
     
     if (!product) {
@@ -48,83 +31,136 @@ router.get('/:id', async (req, res) => {
     
     res.json(product);
   } catch (error) {
-    console.error('Get product error:', error);
+    console.error('Error fetching product:', error);
     res.status(500).json({ error: 'Failed to fetch product' });
   }
 });
 
-// CREATE product (admin only)
-router.post('/', adminMiddleware, async (req, res) => {
+// Create product (Admin only)
+router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, price, imageUrl, stock, category } = req.body;
-    
-    // Validate input
-    if (!name || !description || !price || !category) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-    
+    const {
+      name,
+      description,
+      price,
+      imageUrl,
+      stock,
+      category,
+      isEcoFriendly,
+      carbonFootprint,
+      plasticContent,
+      recyclable,
+      locallySourced
+    } = req.body;
+
+    console.log('Creating product with data:', {
+      name,
+      description,
+      price,
+      imageUrl,
+      stock,
+      category,
+      isEcoFriendly,
+      carbonFootprint,
+      plasticContent,
+      recyclable,
+      locallySourced
+    });
+
+    // Create product with all fields including sustainability
     const product = await prisma.product.create({
       data: {
         name,
         description,
         price: parseFloat(price),
-        imageUrl: imageUrl || null,
-        stock: stock || 0,
-        category
+        imageUrl,
+        stock: parseInt(stock),
+        category,
+        // Sustainability fields with proper type conversion
+        isEcoFriendly: Boolean(isEcoFriendly),
+        carbonFootprint: parseFloat(carbonFootprint) || 0.0,
+        plasticContent: parseFloat(plasticContent) || 0.0,
+        recyclable: Boolean(recyclable),
+        locallySourced: Boolean(locallySourced),
+        sustainabilityScore: 0,
+        ecoTags: []
       }
     });
-    
+
+    console.log('Product created successfully:', product);
     res.status(201).json(product);
   } catch (error) {
-    console.error('Create product error:', error);
+    console.error('Error creating product:', error);
     res.status(500).json({ error: 'Failed to create product' });
   }
 });
 
-// UPDATE product (admin only)
-router.put('/:id', adminMiddleware, async (req, res) => {
+// Update product (Admin only)
+router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { name, description, price, imageUrl, stock, category } = req.body;
-    
-    const updateData = {};
-    if (name !== undefined) updateData.name = name;
-    if (description !== undefined) updateData.description = description;
-    if (price !== undefined) updateData.price = parseFloat(price);
-    if (imageUrl !== undefined) updateData.imageUrl = imageUrl;
-    if (stock !== undefined) updateData.stock = stock;
-    if (category !== undefined) updateData.category = category;
-    
-    const product = await prisma.product.update({
-      where: { id: parseInt(id) },
-      data: updateData
+    const {
+      name,
+      description,
+      price,
+      imageUrl,
+      stock,
+      category,
+      isEcoFriendly,
+      carbonFootprint,
+      plasticContent,
+      recyclable,
+      locallySourced
+    } = req.body;
+
+    console.log('Updating product with data:', {
+      name,
+      description,
+      price,
+      imageUrl,
+      stock,
+      category,
+      isEcoFriendly,
+      carbonFootprint,
+      plasticContent,
+      recyclable,
+      locallySourced
     });
-    
+
+    const product = await prisma.product.update({
+      where: { id: parseInt(req.params.id) },
+      data: {
+        name,
+        description,
+        price: parseFloat(price),
+        imageUrl,
+        stock: parseInt(stock),
+        category,
+        // Sustainability fields with proper type conversion
+        isEcoFriendly: Boolean(isEcoFriendly),
+        carbonFootprint: parseFloat(carbonFootprint) || 0.0,
+        plasticContent: parseFloat(plasticContent) || 0.0,
+        recyclable: Boolean(recyclable),
+        locallySourced: Boolean(locallySourced)
+      }
+    });
+
+    console.log('Product updated successfully:', product);
     res.json(product);
   } catch (error) {
-    console.error('Update product error:', error);
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Product not found' });
-    }
+    console.error('Error updating product:', error);
     res.status(500).json({ error: 'Failed to update product' });
   }
 });
 
-// DELETE product (admin only)
-router.delete('/:id', adminMiddleware, async (req, res) => {
+// Delete product (Admin only)
+router.delete('/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { id } = req.params;
-    
     await prisma.product.delete({
-      where: { id: parseInt(id) }
+      where: { id: parseInt(req.params.id) }
     });
-    
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
-    console.error('Delete product error:', error);
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Product not found' });
-    }
+    console.error('Error deleting product:', error);
     res.status(500).json({ error: 'Failed to delete product' });
   }
 });

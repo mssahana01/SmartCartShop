@@ -21,17 +21,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Check authentication
-function checkAuth() {
+async function checkAuth() {
   if (state.token) {
     try {
       const payload = JSON.parse(atob(state.token.split('.')[1]));
-      state.user = { 
-        id: payload.userId, 
-        role: payload.role 
-      };
+      
+      // Fetch full user data from API
+      const userData = await apiCall('/auth/me');
+      state.user = userData;
+      
       updateAuthUI(true);
       loadCart();
     } catch (error) {
+      console.error('Auth check failed:', error);
       logout();
     }
   }
@@ -41,6 +43,7 @@ function checkAuth() {
 function updateAuthUI(isAuthenticated) {
   const authButtons = document.getElementById('authButtons');
   const userInfo = document.getElementById('userInfo');
+  const userName = document.getElementById('userName');
   const navCart = document.getElementById('navCart');
   const navOrders = document.getElementById('navOrders');
   const navAdmin = document.getElementById('navAdmin');
@@ -58,8 +61,10 @@ function updateAuthUI(isAuthenticated) {
       navAdmin.style.display = 'block';
     }
     
+    // Display user's name
     if (state.user && state.user.name) {
-      document.getElementById('userName').textContent = state.user.name;
+      userName.textContent = `👤 ${state.user.name}`;
+      userName.style.display = 'block';
     }
   } else {
     authButtons.style.display = 'flex';
@@ -94,7 +99,7 @@ function initEventListeners() {
   document.querySelectorAll('[data-page]').forEach(link => {
     link.addEventListener('click', (e) => {
       e.preventDefault();
-      const page = e.target.dataset.page;
+      const page = e.target.dataset.page || e.target.closest('[data-page]').dataset.page;
       navigateTo(page);
     });
   });
@@ -305,25 +310,49 @@ function renderProducts(products) {
     // Determine carbon level
     let carbonClass = 'low';
     let carbonEmoji = '🌱';
-    if (product.carbonFootprint > 10) {
+    const carbonValue = product.carbonFootprint || 0;
+    
+    if (carbonValue > 10) {
       carbonClass = 'high';
       carbonEmoji = '⚠️';
-    } else if (product.carbonFootprint > 5) {
+    } else if (carbonValue > 5) {
       carbonClass = 'medium';
       carbonEmoji = '⚡';
     }
     
+    // Build sustainability badges
+    let badges = '';
+    if (product.isEcoFriendly) {
+      badges += '<div class="eco-badge" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">🌿 Eco-Friendly</div>';
+    }
+    if (product.recyclable) {
+      badges += '<div class="eco-badge" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">♻️ Recyclable</div>';
+    }
+    if (product.locallySourced) {
+      badges += '<div class="eco-badge" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);">📍 Local</div>';
+    }
+    
     return `
       <div class="product-card">
-        ${product.isEcoFriendly ? '<div class="eco-badge">🌿 Eco-Friendly</div>' : ''}
+        ${badges ? `<div class="product-badges">${badges}</div>` : ''}
         <img src="${product.imageUrl || 'https://via.placeholder.com/300x200?text=Product'}" 
              alt="${product.name}" class="product-image">
         <span class="product-category">${product.category}</span>
         <h3 class="product-name">${product.name}</h3>
         <p class="product-description">${product.description}</p>
         <div class="product-price">$${parseFloat(product.price).toFixed(2)}</div>
-        <div class="carbon-footprint ${carbonClass}">
-          ${carbonEmoji} ${product.carbonFootprint.toFixed(1)} kg CO₂
+        <div class="sustainability-info">
+          <div class="metric-item">
+            <span class="metric-icon">🌱</span>
+            <span class="metric-value">${carbonValue.toFixed(1)} kg CO₂</span>
+          </div>
+          ${(product.plasticContent || 0) > 0 ? `
+          <div class="metric-divider"></div>
+          <div class="metric-item">
+            <span class="metric-icon">🧴</span>
+            <span class="metric-value">${(product.plasticContent || 0).toFixed(0)}g plastic</span>
+          </div>
+          ` : ''}
         </div>
         <div class="product-stock">Stock: ${product.stock}</div>
         <div class="product-actions">
@@ -338,7 +367,6 @@ function renderProducts(products) {
             </button>
           `}
           ${state.token && state.user && state.user.role === 'admin' ? `
-            <button class="btn btn-secondary btn-small" onclick="editAdminProduct(${product.id})">Edit</button>
             <button class="btn btn-danger btn-small" onclick="deleteAdminProduct(${product.id})">Delete</button>
           ` : ''}
         </div>
@@ -422,6 +450,7 @@ function renderCart() {
   if (state.cart.length === 0) {
     container.innerHTML = '<div class="empty-state"><h3>Your cart is empty</h3><p>Add some products to get started!</p></div>';
     totalContainer.innerHTML = '';
+    totalContainer.style.display = 'none';
     checkoutBtn.style.display = 'none';
     return;
   }
@@ -451,6 +480,7 @@ function renderCart() {
   `).join('');
   
   totalContainer.innerHTML = `<h3>Total: $${total.toFixed(2)}</h3>`;
+  totalContainer.style.display = 'block';
   checkoutBtn.style.display = 'block';
 }
 
@@ -521,7 +551,7 @@ function renderOrders() {
         </div>
         <span class="order-status ${order.status}">${order.status.toUpperCase()}</span>
       </div>
-      ${order.greenPointsEarned ? `
+      ${order.greenPointsEarned && order.greenPointsEarned > 0 ? `
         <div class="order-green-points">
           🌱 Earned ${order.greenPointsEarned} Green Points
         </div>
@@ -584,7 +614,7 @@ function renderAdminProducts(products) {
           <span>${product.category}</span> • 
           <span>$${parseFloat(product.price).toFixed(2)}</span> • 
           <span>Stock: ${product.stock}</span>
-          ${product.isEcoFriendly ? ` • <span style="color: #4caf50;">CO₂: ${product.carbonFootprint.toFixed(1)}kg</span>` : ''}
+          ${product.isEcoFriendly ? ` • <span style="color: #4caf50;">CO₂: ${(product.carbonFootprint || 0).toFixed(1)}kg</span>` : ''}
         </div>
       </div>
       <div class="admin-product-actions">
@@ -631,6 +661,8 @@ async function handleAdminProductSubmit(e) {
     locallySourced: document.getElementById('adminProductLocal')?.checked || false
   };
   
+  console.log('Submitting product data:', productData);
+  
   try {
     if (productId) {
       await apiCall(`/products/${productId}`, {
@@ -669,11 +701,11 @@ function editAdminProduct(productId) {
   
   // Sustainability fields
   if (document.getElementById('adminProductEcoFriendly')) {
-    document.getElementById('adminProductEcoFriendly').checked = product.isEcoFriendly;
-    document.getElementById('adminProductCarbon').value = product.carbonFootprint;
-    document.getElementById('adminProductPlastic').value = product.plasticContent;
-    document.getElementById('adminProductRecyclable').checked = product.recyclable;
-    document.getElementById('adminProductLocal').checked = product.locallySourced;
+    document.getElementById('adminProductEcoFriendly').checked = product.isEcoFriendly || false;
+    document.getElementById('adminProductCarbon').value = product.carbonFootprint || 2.5;
+    document.getElementById('adminProductPlastic').value = product.plasticContent || 50;
+    document.getElementById('adminProductRecyclable').checked = product.recyclable || false;
+    document.getElementById('adminProductLocal').checked = product.locallySourced || false;
   }
   
   document.getElementById('adminFormBtnText').textContent = 'Update Product';
@@ -706,6 +738,10 @@ function resetAdminForm() {
   document.getElementById('adminFormBtnText').textContent = 'Add Product';
   document.getElementById('adminCancelBtn').style.display = 'none';
   document.getElementById('imagePreview').style.display = 'none';
+  
+  // Reset sustainability fields to defaults
+  document.getElementById('adminProductCarbon').value = 2.5;
+  document.getElementById('adminProductPlastic').value = 50;
 }
 
 // Sustainability Functions
@@ -713,11 +749,17 @@ async function loadSustainabilityDashboard() {
   if (!state.token) return;
   
   try {
+    console.log('Loading sustainability dashboard...');
+    
     const dashboard = await apiCall('/sustainability/dashboard');
+    console.log('Dashboard data:', dashboard);
     state.sustainabilityData = dashboard;
     
     const preferences = await apiCall('/sustainability/preferences');
+    console.log('Preferences data:', preferences);
+    
     const leaderboard = await apiCall('/sustainability/leaderboard');
+    console.log('Leaderboard data:', leaderboard);
     
     await loadCartImpact();
     
@@ -729,14 +771,19 @@ async function loadSustainabilityDashboard() {
 }
 
 function renderSustainabilityDashboard(dashboard, preferences, leaderboard) {
-  document.getElementById('co2Saved').textContent = `${dashboard.totalCO2Saved.toFixed(1)} kg`;
-  document.getElementById('plasticSaved').textContent = `${dashboard.totalPlasticSaved.toFixed(0)} g`;
-  document.getElementById('greenPoints').textContent = dashboard.greenPoints;
-  document.getElementById('userRank').textContent = `#${dashboard.globalRank}`;
+  const co2Saved = dashboard.totalCO2Saved || 0;
+  const plasticSaved = dashboard.totalPlasticSaved || 0;
+  const greenPoints = dashboard.greenPoints || 0;
+  const globalRank = dashboard.globalRank || 0;
   
-  document.getElementById('packagingPref').value = preferences.packagingPreference;
-  document.getElementById('notifyGreenDeals').checked = preferences.notifyGreenDeals;
-  document.getElementById('showCarbonFootprint').checked = preferences.showCarbonFootprint;
+  document.getElementById('co2Saved').textContent = `${co2Saved.toFixed(1)} kg`;
+  document.getElementById('plasticSaved').textContent = `${plasticSaved.toFixed(0)} g`;
+  document.getElementById('greenPoints').textContent = greenPoints;
+  document.getElementById('userRank').textContent = `#${globalRank}`;
+  
+  document.getElementById('packagingPref').value = preferences.packagingPreference || 'standard';
+  document.getElementById('notifyGreenDeals').checked = preferences.notifyGreenDeals || false;
+  document.getElementById('showCarbonFootprint').checked = preferences.showCarbonFootprint !== false;
   
   renderLeaderboard(leaderboard);
 }
@@ -746,6 +793,7 @@ async function loadCartImpact() {
   
   try {
     const impact = await apiCall('/sustainability/cart-impact');
+    console.log('Cart impact data:', impact);
     state.cartImpact = impact;
     renderCartImpact(impact);
   } catch (error) {
@@ -761,30 +809,34 @@ function renderCartImpact(impact) {
     return;
   }
   
+  // Values are already numbers from the backend, just format for display
+  const co2Display = typeof impact.totalCO2 === 'number' ? impact.totalCO2.toFixed(1) : (impact.totalCO2 || '0.0');
+  const plasticDisplay = typeof impact.totalPlastic === 'number' ? impact.totalPlastic.toFixed(0) : (impact.totalPlastic || '0');
+  
   container.innerHTML = `
     <div class="cart-impact-display">
       <div class="impact-metric">
-        <div class="impact-metric-value">${impact.totalCO2} kg</div>
+        <div class="impact-metric-value">${co2Display} kg</div>
         <div class="impact-metric-label">CO₂ Footprint</div>
       </div>
       
       <div class="impact-metric">
-        <div class="impact-metric-value">${impact.totalPlastic} g</div>
+        <div class="impact-metric-value">${plasticDisplay} g</div>
         <div class="impact-metric-label">Plastic Content</div>
       </div>
       
       <div class="impact-metric">
-        <div class="impact-metric-value">${impact.ecoFriendlyItems}/${impact.totalItems}</div>
+        <div class="impact-metric-value">${impact.ecoFriendlyItems || 0}/${impact.totalItems || 0}</div>
         <div class="impact-metric-label">Eco-Friendly Items</div>
       </div>
       
       <div class="impact-metric">
-        <div class="impact-metric-value">${impact.ecoPercentage}%</div>
+        <div class="impact-metric-value">${impact.ecoPercentage || 0}%</div>
         <div class="impact-metric-label">Eco Score</div>
       </div>
       
       <div class="impact-metric">
-        <div class="impact-metric-value" style="color: #4caf50;">+${impact.potentialGreenPoints}</div>
+        <div class="impact-metric-value" style="color: #4caf50;">+${impact.potentialGreenPoints || 0}</div>
         <div class="impact-metric-label">Potential Green Points</div>
       </div>
     </div>
@@ -794,7 +846,7 @@ function renderCartImpact(impact) {
 function renderLeaderboard(leaderboard) {
   const container = document.getElementById('leaderboard');
   
-  if (leaderboard.length === 0) {
+  if (!leaderboard || leaderboard.length === 0) {
     container.innerHTML = '<p style="text-align: center; color: #666;">No data yet. Be the first green champion!</p>';
     return;
   }
@@ -804,9 +856,9 @@ function renderLeaderboard(leaderboard) {
       <div class="leaderboard-rank">${getRankEmoji(index + 1)}${index + 1}</div>
       <div class="leaderboard-name">${user.name}</div>
       <div class="leaderboard-stats">
-        <div class="leaderboard-points">⭐ ${user.greenPoints} pts</div>
+        <div class="leaderboard-points">⭐ ${user.greenPoints || 0} pts</div>
         <div style="font-size: 0.85rem; color: #666;">
-          🌍 ${user.totalCO2Saved.toFixed(1)} kg CO₂ | ♻️ ${user.totalPlasticSaved.toFixed(0)} g plastic
+          🌍 ${(user.totalCO2Saved || 0).toFixed(1)} kg CO₂ | ♻️ ${(user.totalPlasticSaved || 0).toFixed(0)} g plastic
         </div>
       </div>
     </div>

@@ -17,6 +17,10 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       }
     });
     
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
     // Get user's eco-friendly purchases count
     const ecoOrders = await prisma.order.findMany({
       where: { userId: req.userId },
@@ -44,9 +48,11 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const userRank = allUsers.findIndex(u => u.id === req.userId) + 1;
     
     res.json({
-      ...user,
+      greenPoints: user.greenPoints || 0,
+      totalCO2Saved: user.totalCO2Saved || 0,
+      totalPlasticSaved: user.totalPlasticSaved || 0,
       ecoProductsPurchased: ecoProductCount,
-      globalRank: userRank,
+      globalRank: userRank || 0,
       totalUsers: allUsers.length
     });
   } catch (error) {
@@ -64,7 +70,12 @@ router.get('/preferences', authMiddleware, async (req, res) => {
     
     if (!preferences) {
       preferences = await prisma.userPreference.create({
-        data: { userId: req.userId }
+        data: { 
+          userId: req.userId,
+          packagingPreference: 'standard',
+          notifyGreenDeals: true,
+          showCarbonFootprint: true
+        }
       });
     }
     
@@ -126,18 +137,25 @@ router.get('/leaderboard', async (req, res) => {
 // Calculate cart's environmental impact
 router.get('/cart-impact', authMiddleware, async (req, res) => {
   try {
+    console.log('=== CART IMPACT DEBUG ===');
+    console.log('User ID from token:', req.userId);
+    console.log('User role:', req.userRole);
+    
     const cartItems = await prisma.cartItem.findMany({
       where: { userId: req.userId },
       include: { product: true }
     });
+    
+    console.log('Cart items found:', cartItems.length);
+    console.log('Cart items:', JSON.stringify(cartItems, null, 2));
     
     let totalCO2 = 0;
     let totalPlastic = 0;
     let ecoFriendlyCount = 0;
     
     cartItems.forEach(item => {
-      totalCO2 += item.product.carbonFootprint * item.quantity;
-      totalPlastic += item.product.plasticContent * item.quantity;
+      totalCO2 += (item.product.carbonFootprint || 0) * item.quantity;
+      totalPlastic += (item.product.plasticContent || 0) * item.quantity;
       if (item.product.isEcoFriendly) ecoFriendlyCount++;
     });
     
@@ -145,12 +163,12 @@ router.get('/cart-impact', authMiddleware, async (req, res) => {
     const potentialGreenPoints = Math.floor(ecoFriendlyCount * 10);
     
     res.json({
-      totalCO2: totalCO2.toFixed(2),
-      totalPlastic: totalPlastic.toFixed(2),
+      totalCO2: Math.round(totalCO2 * 10) / 10, // Round to 1 decimal as number
+      totalPlastic: Math.round(totalPlastic), // Round to integer as number
       ecoFriendlyItems: ecoFriendlyCount,
       totalItems: cartItems.length,
       potentialGreenPoints,
-      ecoPercentage: cartItems.length > 0 ? ((ecoFriendlyCount / cartItems.length) * 100).toFixed(1) : 0
+      ecoPercentage: cartItems.length > 0 ? Math.round((ecoFriendlyCount / cartItems.length) * 100) : 0
     });
   } catch (error) {
     console.error('Cart impact error:', error);
